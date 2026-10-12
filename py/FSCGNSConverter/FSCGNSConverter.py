@@ -6,9 +6,11 @@ import numpy
 
 import Converter.PyTree as C
 import Converter.Internal as Internal
+import Converter.Converter as Converter
 import Converter.Mpi as Cmpi
 import Generator.PyTree as G
 import Transform.PyTree as T
+import Post.PyTree as P
 
 from FSDataManager import (
     FSClac,
@@ -48,7 +50,8 @@ __all__ = [
 # Global variables
 # ---------------------------------------------------------------------------- #
 
-# ENABLE_PROFILING: bool; Switch to toggle on or off profiling
+
+# ENABLE_PROFILING: bool; Switch to toggle profiling on or off
 ENABLE_PROFILING = False
 
 # CGNS_CONTAINER_NAMES: list; Names of the CGNS containers
@@ -81,8 +84,6 @@ def ProfileTime(func):
 # ---------------------------------------------------------------------------- #
 # Functions
 # ---------------------------------------------------------------------------- #
-
-
 
 
 def CreateQuad2Quad(coords, ncFaces, ncFacesCentroids, plane="xy", tol=1e-6):
@@ -382,16 +383,6 @@ def ComputeQuadCentroids(xNP, yNP, zNP, eltConn):
     return centroids
 
 
-def InitCell2ProcOutsideClass(clac, ncellsOfType=0):
-    nprocs = Cmpi.size
-    gath_cell2Proc = ArrayOps.AllGather(ncellsOfType, clac)
-    fs_cell2Proc = FSIntArray(nprocs + 1)
-    fs_cell2Proc[0] = 0
-    for i in range(nprocs):
-        fs_cell2Proc[i + 1] = fs_cell2Proc[i] + int(gath_cell2Proc[i])
-    return fs_cell2Proc
-
-
 def BuildMeshOps(
     meshName,
     partitioningLibrary="PARMETIS",
@@ -481,7 +472,7 @@ def GenerateBCDictFromFSMesh(fsmesh=None):
     return bcDictPartial
 
 
-# Aliases
+# Lower-case aliases for Cassiopee users
 buildMeshOps = BuildMeshOps
 generateBCDictFromFSMesh = GenerateBCDictFromFSMesh
 
@@ -492,7 +483,7 @@ generateBCDictFromFSMesh = GenerateBCDictFromFSMesh
 
 
 class FSCGNSConverter:
-    # Map cell numbers from FS to CGNS and vice versa
+    # Map cell type indices from FS to CGNS and vice versa
     FS2CGNS_CT = {
         FSMeshEnums.CT_Node: 2,
         FSMeshEnums.CT_Edge2: 3,
@@ -502,10 +493,10 @@ class FSCGNSConverter:
         FSMeshEnums.CT_Pyra5: 12,
         FSMeshEnums.CT_Prism6: 14,
         FSMeshEnums.CT_Hexa8: 17,
-        FSMeshEnums.CT_Poly2D: 22,
         FSMeshEnums.CT_Poly3D: 23
     }
     CGNS2FS_CT = {v: k for k, v in FS2CGNS_CT.items()}
+    CGNS2FS_CT[22] = FSMeshEnums.CT_Poly3D
 
     def __init__(
         self,
@@ -594,8 +585,8 @@ class FSCGNSConverter:
         # Create other class attributes
         self.meshType = None
         self.nvertices = 0
-        self.nvolumeCells = 0
         self.nsurfaceCells = 0
+        self.nvolumeCells = 0
         self.fsSurfaceCellTypes = []
         self.fsVolumeCellTypes = []
         self.np_coordinates = None
@@ -667,7 +658,7 @@ class FSCGNSConverter:
             includeGhostCells = False
         self.RecoverFSMeshInfo(includeGhostCells=includeGhostCells)
         self.InitBCDict()
-        
+
         self.RecoverFSCoordinates()
         self.InitCGNSCoordinates()
         self.RecoverFSConnectivity(
@@ -685,7 +676,7 @@ class FSCGNSConverter:
         self.RecoverFSFlowSolution()
 
         if forFFDX:
-            self.ReleaseResources()
+            self.FreeResources()
             # Convert ME to NGon
             if Cmpi.master and self.verbose:
                 print("Converting Multiple-Element mesh to NGon.")
@@ -731,7 +722,7 @@ class FSCGNSConverter:
             ibmDatasets = self.RecoverPointList2BoundaryMarkers()
         if Cmpi.size > 1:
             self.InitFSBCsMPI(ibmDatasets)
-            self.ParallelDeduplicateNodesFSMesh()
+            self.DeduplicateFSNodesMPI()
         else:
             self.InitFSBCs(ibmDatasets)
         self.InitFSFlowSolution()
@@ -861,11 +852,6 @@ class FSCGNSConverter:
             return None  # No BCs defined
 
         n_bcs = Internal.getNodesFromType1(n_zoneBCs, "BC_t")
-        if len(self.bcDict) != len(n_bcs):
-            print(
-                f"WARNING: Number of BCs in CGNS mesh, {len(n_bcs)}, does not "
-                f"match the number of BCs in bcsNames, {len(self.bcDict)}."
-            )
 
         # Loop over all existing conformal BC nodes (IndexArray or IndexRange)
         # and offset vertex indices by the number of volume cells
@@ -886,9 +872,9 @@ class FSCGNSConverter:
                 ntotBCVertices += np_vertexPL.shape[0]
             n_IR = Internal.getNodeFromType1(n_bc, "IndexRange_t")
             if n_IR is not None and n_IR[0] == "ElementRange":
-                np_eltRange = Internal.getNodeFromName1(n_bc, "ElementRange")[
-                    1
-                ][0]
+                np_eltRange = (
+                    Internal.getNodeFromName1(n_bc, "ElementRange")[1][0]
+                )
                 nfaces = np_eltRange[1] - np_eltRange[0] + 1
                 np_eltRange[0] = offset + 1
                 np_eltRange[1] = offset + nfaces
@@ -998,7 +984,6 @@ class FSCGNSConverter:
 
     @ProfileTime
     def PrepareCGNSConnectivitiesStruct(self):
-        eltTypeList = []
         C._rmBCOfType(self.pyTree, "BCMatch")
         C._rmBCOfType(self.pyTree, "BCDegeneratedLine")
 
@@ -1041,8 +1026,7 @@ class FSCGNSConverter:
             zbcs.append(zbc)
 
         z = C.convertArray2Hexa(z)
-        if float(C.__version__) < 5.0:
-            z = G.close(z)
+        z = G.close(z)
         self.nvertices = int(Internal.getValue(z)[0][0])
         nBCs = len(bcTypes)
         for i in range(nBCs):
@@ -1118,35 +1102,42 @@ class FSCGNSConverter:
 
         zones = Internal.getZones(self.pyTree)
         if zones:
-            zone = zones[0]
-            zoneDim = Internal.getZoneDim(zone)
+            z = zones[0]
+            zoneDim = Internal.getZoneDim(z)
             self.meshType = zoneDim[0]
 
             if self.meshType == "Unstructured":
                 self.nvertices = zoneDim[1]
                 self.nvolumeCells = zoneDim[2]
-
-                n_elts = Internal.getNodesFromType(zone, "Elements_t")
-                for n_elt in n_elts:
-                    cgnsCellType = Internal.getValue(n_elt)[0]
-                    fsCellType = FSCGNSConverter.CGNS2FS_CT[cgnsCellType]
-                    if (
-                        fsCellType in FSUnstructVolumeCellTypes
-                        and fsCellType not in self.fsVolumeCellTypes
-                    ):
-                        self.fsVolumeCellTypes.append(fsCellType)
-                    elif fsCellType in FSUnstructSurfaceCellTypes:
-                        eltRange = Internal.getNodeFromName(
-                            n_elt, "ElementRange"
-                        )[1]
-                        nfaces = eltRange[1] - eltRange[0] + 1
-                        if nfaces == 0:
-                            raise ValueError(
-                                "RecoverCGNSMeshInfo: Empty surface connectivity."
-                            )
-                        self.nsurfaceCells += nfaces
-                        if fsCellType not in self.fsSurfaceCellTypes:
-                            self.fsSurfaceCellTypes.append(fsCellType)
+                isNGon = zoneDim[3] == "NGON"
+                if isNGon:
+                    if FSMeshEnums.CT_Poly3D not in self.fsVolumeCellTypes:
+                        self.fsVolumeCellTypes.append(FSMeshEnums.CT_Poly3D)
+                    if FSMeshEnums.CT_Poly2D not in self.fsSurfaceCellTypes:   
+                        self.fsSurfaceCellTypes.append(FSMeshEnums.CT_Poly2D)
+                else:
+                    n_elts = Internal.getNodesFromType(z, "Elements_t")
+                    for n_elt in n_elts:
+                        cgnsCellType = Internal.getValue(n_elt)[0]
+                        fsCellType = FSCGNSConverter.CGNS2FS_CT[cgnsCellType]
+                        if (
+                            fsCellType in FSUnstructVolumeCellTypes
+                            and fsCellType not in self.fsVolumeCellTypes
+                        ):
+                            self.fsVolumeCellTypes.append(fsCellType)
+                        elif fsCellType in FSUnstructSurfaceCellTypes:
+                            eltRange = Internal.getNodeFromName(
+                                n_elt, "ElementRange"
+                            )[1]
+                            nfaces = eltRange[1] - eltRange[0] + 1
+                            if nfaces == 0:
+                                raise ValueError(
+                                    "RecoverCGNSMeshInfo: Empty surface "
+                                    "connectivity."
+                                )
+                            self.nsurfaceCells += nfaces
+                            if fsCellType not in self.fsSurfaceCellTypes:
+                                self.fsSurfaceCellTypes.append(fsCellType)
 
             elif self.meshType == "Structured":
                 ni, nj, nk = zoneDim[1], zoneDim[2], zoneDim[3]
@@ -1182,26 +1173,28 @@ class FSCGNSConverter:
             )
         self.SetNumpyCoordinates(np_coordinates)
 
-    def InitCell2Proc(self, fsCellType, ncellsOfType=0):
+    def InitCell2Proc(self, ncellsOfType=0):
         nprocs = Cmpi.size
         gath_cell2Proc = ArrayOps.AllGather(ncellsOfType, self.clac)
         fs_cell2Proc = FSIntArray(nprocs + 1)
         fs_cell2Proc[0] = 0
         for i in range(nprocs):
             fs_cell2Proc[i + 1] = fs_cell2Proc[i] + int(gath_cell2Proc[i])
-        self.cell2ProcDict[fsCellType] = fs_cell2Proc
+        return fs_cell2Proc
 
     @ProfileTime
     def RecoverCGNSConnectivity(self):
-        # If the CGNS PyTree contains at least 1 NGON zone, convert it to NGonv4
+        # If the CGNS PyTree contains at least 1 NGON zone, convert it to a
+        # signed NGonv4
         zones = Internal.getZones(self.pyTree)
         for z in zones:
             dim = Internal.getZoneDim(z)
             if dim[0] == 'Unstructured' and dim[3] == 'NGON':
                 Internal._adaptNGon32NGon4(self.pyTree)
+                C._signNGonFaces(self.pyTree)
                 break
 
-        # Loop over Elements nodes and store references to the CGNS
+        # Loop over Elements_t nodes and store references to the CGNS
         # connectivities (these are 1-based) in self.connectivityDict
         self.connectivityDict = {}
         n_elts = Internal.getNodesFromType(self.pyTree, "Elements_t")
@@ -1219,12 +1212,15 @@ class FSCGNSConverter:
             n_ER = Internal.getNodeFromName1(n_elt, "ElementRange")
             n_EC = Internal.getNodeFromName1(n_elt, "ElementConnectivity")
             nelts = int(n_ER[1][1] - n_ER[1][0] + 1)
-            if fsCellType in [FSMeshEnums.CT_Poly2D, FSMeshEnums.CT_Poly3D]:
-                # NGON, NFACE
-                self.connectivityDict[fsCellType]["nCells"] = nelts
-                self.connectivityDict[fsCellType]["ElementConnectivity"] = n_EC[1]
-                n_ESO = Internal.getNodeFromName1(n_elt, "ElementStartOffset")
-                self.connectivityDict[fsCellType]["ElementStartOffset"] = n_ESO[1]
+            if eltType == 22:  # NGON
+                self.connectivityDict[FSMeshEnums.CT_Poly3D]["NGON"] = n_EC[1]
+                n_indPG = Internal.getNodeFromName1(n_elt, "ElementStartOffset")
+                self.connectivityDict[FSMeshEnums.CT_Poly3D]["indPG"] = n_indPG[1]
+            elif eltType == 23:  # NFACE
+                self.connectivityDict[FSMeshEnums.CT_Poly3D]["nCells"] = nelts
+                self.connectivityDict[FSMeshEnums.CT_Poly3D]["NFACE"] = n_EC[1]
+                n_indPH = Internal.getNodeFromName1(n_elt, "ElementStartOffset")
+                self.connectivityDict[FSMeshEnums.CT_Poly3D]["indPH"] = n_indPH[1]
             else:
                 # Basic Element
                 nvpe = int(n_EC[1].size // nelts)
@@ -1238,14 +1234,40 @@ class FSCGNSConverter:
     @ProfileTime
     def InitFSConnectivity(self, cellType):
         hasCellsOfType = cellType in self.connectivityDict
-        if cellType == FSMeshEnums.CT_Poly2D:
-            return
+        if cellType == FSMeshEnums.CT_Poly2D and hasCellsOfType:
+            # Construct boundary node lists and boundary node counts
+            fsCellTypeDict = self.connectivityDict[cellType]
+            poly2DCell2NodeList = fsCellTypeDict["ElementConnectivity"]
+            poly2DCell2NodeCounts = fsCellTypeDict["NodeCounts"]
+
+            # Store the boundary face node counts in a 1D array
+            fs_poly2DCell2NodeCounts = FSIntArray(poly2DCell2NodeCounts.size)
+            numpy.copyto(
+                numpy.array(fs_poly2DCell2NodeCounts.Buffer(), copy=False),
+                poly2DCell2NodeCounts,
+                casting="same_kind",
+            )
+
+            # Store the boundary face nodes in a 1D array
+            fs_poly2DCell2NodeList = FSIntArray(poly2DCell2NodeList.size)
+            numpy.copyto(
+                numpy.array(fs_poly2DCell2NodeList.Buffer(), copy=False),
+                poly2DCell2NodeList,
+                casting="same_kind",
+            )
+
+            # Init the unstructured polygonal mesh faces
+            self.fsmesh.InitUnstructPolyCells(
+                cellType,
+                fs_poly2DCell2NodeCounts,
+                fs_poly2DCell2NodeList
+            )
         elif cellType == FSMeshEnums.CT_Poly3D:
-            nPoly3D = self.connectivityDict[FSMeshEnums.CT_Poly3D]["nCells"]
-            np_ngon = self.connectivityDict[FSMeshEnums.CT_Poly2D]["ElementConnectivity"]
-            np_nface = self.connectivityDict[FSMeshEnums.CT_Poly3D]["ElementConnectivity"]
-            np_indPG = self.connectivityDict[FSMeshEnums.CT_Poly2D]["ElementStartOffset"]
-            np_indPH = self.connectivityDict[FSMeshEnums.CT_Poly3D]["ElementStartOffset"]
+            nPoly3D = self.connectivityDict[cellType]["nCells"]
+            np_ngon = self.connectivityDict[cellType]["NGON"]
+            np_nface = self.connectivityDict[cellType]["NFACE"]
+            np_indPG = self.connectivityDict[cellType]["indPG"]
+            np_indPH = self.connectivityDict[cellType]["indPH"]
             
             # Construct node lists and node counts
             poly3DCell2NodeCounts = []
@@ -1324,60 +1346,16 @@ class FSCGNSConverter:
 
             # Init the unstructured polyhedron mesh cells
             self.fsmesh.InitUnstructPolyCells(
-                FSMeshEnums.CT_Poly3D,
+                cellType,
                 fs_poly3DCell2NodeCounts,
                 fs_poly3DCell2NodeList
             )
             self.fsmesh.InitUnstructPolyCellFaces(
-                FSMeshEnums.CT_Poly3D,
+                cellType,
                 fs_cell2FaceCounts,
                 fs_face2NodeCounts,
                 fs_face2NodeList
             )
-
-            # Construct boundary node lists and boundary node counts
-            poly2DCell2NodeCounts = []
-            poly2DCell2NodeList = []
-            zones = Internal.getZones(self.pyTree)
-            for z in zones:
-                n_zoneBCs = Internal.getNodesFromType1(z, "ZoneBC_t")
-                if len(n_zoneBCs) == 0:
-                    continue
-                n_bcs = Internal.getNodesFromType1(n_zoneBCs, "BC_t")
-                for n_bc in n_bcs:
-                    n_pl = Internal.getNodeFromName1(n_bc, Internal.__FACELIST__)
-                    if n_pl is None:
-                        continue
-                    faceIds = n_pl[1][0]
-                    for fidx in faceIds:
-                        nv = np_indPG[fidx] - np_indPG[fidx-1]
-                        faceNodes = np_ngon[np_indPG[fidx-1]:np_indPG[fidx]] - 1
-                        poly2DCell2NodeCounts.append(nv)
-                        poly2DCell2NodeList.extend(faceNodes)
-
-            if len(poly2DCell2NodeCounts):
-                # Store the boundary face node counts in a 1D array
-                fs_poly2DCell2NodeCounts = FSIntArray(len(poly2DCell2NodeCounts))
-                numpy.copyto(
-                    numpy.array(fs_poly2DCell2NodeCounts.Buffer(), copy=False),
-                    numpy.asarray(poly2DCell2NodeCounts, dtype=Internal.E_NpyInt),
-                    casting="same_kind",
-                )
-
-                # Store the boundary face nodes in a 1D array
-                fs_poly2DCell2NodeList = FSIntArray(len(poly2DCell2NodeList))
-                numpy.copyto(
-                    numpy.array(fs_poly2DCell2NodeList.Buffer(), copy=False),
-                    numpy.asarray(poly2DCell2NodeList, dtype=Internal.E_NpyInt),
-                    casting="same_kind",
-                )
-
-                # Init the unstructured polygonal mesh faces
-                self.fsmesh.InitUnstructPolyCells(
-                    FSMeshEnums.CT_Poly2D,
-                    fs_poly2DCell2NodeCounts,
-                    fs_poly2DCell2NodeList
-                )
 
         else:  # Basic-Elements
             if hasCellsOfType:
@@ -1415,12 +1393,12 @@ class FSCGNSConverter:
                 self.fsmesh.InitUnstructCells(cellType, fs_cell2Node, True)
 
     @ProfileTime
-    def InitFSMesh(self, z_ncFaces=None):
+    def InitFSMesh(self, z_nc=None):
         if self.fsmesh is None:
             self.fsmesh = FSMesh(self.clac)
         self.fsmesh.BeginInitialization()
         if Cmpi.size > 1:
-            self.InitCell2Proc(FSMeshEnums.CT_Node, self.nvertices)
+            self.cell2ProcDict[FSMeshEnums.CT_Node] = self.InitCell2Proc(self.nvertices)
             self.fsmesh.InitUnstructNodes(
                 self.cell2ProcDict[FSMeshEnums.CT_Node]
             )
@@ -1430,7 +1408,7 @@ class FSCGNSConverter:
                 ncellsOfType = 0
                 if fsCellType in self.connectivityDict:
                     ncellsOfType = sum(self.connectivityDict[fsCellType]["nCells"])
-                self.InitCell2Proc(fsCellType, ncellsOfType)
+                self.cell2ProcDict[fsCellType] = self.InitCell2Proc(ncellsOfType)
                 self.InitFSConnectivity(fsCellType)
         else:
             self.fsmesh.InitUnstructNodes(self.nvertices)
@@ -1439,9 +1417,9 @@ class FSCGNSConverter:
 
         if not self.conformal:
             if Cmpi.size > 1:
-                self.InitPseudoCell_QuadNQuadMPI(z_ncFaces)
+                self.InitPseudoCell_QuadNQuadMPI(z_nc)
             else:
-                self.InitPseudoCell_QuadNQuad(z_ncFaces)
+                self.InitPseudoCell_QuadNQuad(z_nc)
 
         self.fsmesh.EndInitialization()
         self.InitFSBCCoordinates(
@@ -1460,7 +1438,7 @@ class FSCGNSConverter:
 
     @ProfileTime
     def InitIBMDatasets(self):
-        if not self.ibm:
+        if not(self.ibm and self.nvertices > 0):
             return
         # Flis wall distance initialization
         spatial_discretization = self.ibmParameters["spatial discretization"][
@@ -1492,11 +1470,11 @@ class FSCGNSConverter:
         list_suffix_datasets = [""]
         list_suffix_datasets.extend(range(1, N_IP_per_element))
         for i in range(N_IP_per_element):
-            flis_node = Internal.getNodeFromName(
+            n_flis = Internal.getNodeFromName(
                 self.pyTree, "FlisWallDistance" + str(list_suffix_datasets[i])
             )
             np_flisDistance = Internal.getNodeFromName(
-                flis_node, "TurbulentDistance"
+                n_flis, "TurbulentDistance"
             )[1]
             quantityName = "FlisWallDistance" + str(list_suffix_datasets[i])
             quantityNames = FSStringArray(1)
@@ -2079,7 +2057,7 @@ class FSCGNSConverter:
         if Cmpi.master and self.verbose:
             print("Initializing CGNS mesh connectivity from FS mesh info.")
         ntotElts = 0
-        zone = Internal.getZones(self.pyTree)[0]
+        z = Internal.getZones(self.pyTree)[0]
 
         for fsCellType in self.fsVolumeCellTypes:
             np_cell2Node = self.connectivityDict[fsCellType]["ElementConnectivity"]
@@ -2094,7 +2072,7 @@ class FSCGNSConverter:
                 econnectivity=1 + np_cell2Node.ravel(),
                 erange=[ntotElts + 1, ntotElts + nCellsOfType],
                 eboundary=0,
-                parent=zone
+                parent=z
             )
             ntotElts += nCellsOfType
 
@@ -2130,11 +2108,11 @@ class FSCGNSConverter:
                     erange=eltRange,
                     econnectivity=1 + np_cell2Node.ravel(),
                     eboundary=nCellsOfType,
-                    parent=zone
+                    parent=z
                 )
 
-                C._addBC2Zone(zone, bcName, bcType, elementRange=eltRange)
-                zoneBC = Internal.getNodeFromType(zone, "ZoneBC_t")
+                C._addBC2Zone(z, bcName, bcType, elementRange=eltRange)
+                zoneBC = Internal.getNodeFromType(z, "ZoneBC_t")
                 lastBCName = C.getLastBCName(bcName)
                 n_bc = Internal.getNodeFromName(zoneBC, lastBCName)
                 n_bc[0] = bcName
@@ -2200,11 +2178,11 @@ class FSCGNSConverter:
             )
 
             if fs_cellTypes[0] in self.fsVolumeCellTypes:
-                zone = Internal.getZones(self.pyTree)[0]
+                z = Internal.getZones(self.pyTree)[0]
                 n_FS = Internal.newFlowSolution(
                     name=f"FlowSolution#{dsName}",
                     gridLocation="CellCenter",
-                    parent=zone,
+                    parent=z,
                 )
                 for i, flowSolutionName in enumerate(flowSolutionNames):
                     Internal.newDataArray(
@@ -2377,14 +2355,14 @@ class FSCGNSConverter:
                     )
 
     @ProfileTime
-    def InitPseudoCell_QuadNQuad(self, z_ncFaces):
+    def InitPseudoCell_QuadNQuad(self, z_nc):
         locNCFaces = (
-            Internal.getNodeFromName(z_ncFaces, "ElementConnectivity")[1] - 1
+            Internal.getNodeFromName(z_nc, "ElementConnectivity")[1] - 1
         )
         lenNCF = len(locNCFaces) // 4
-        np_coordsX = Internal.getNodeFromName(z_ncFaces, "CoordinateX")[1]
-        np_coordsY = Internal.getNodeFromName(z_ncFaces, "CoordinateY")[1]
-        np_coordsZ = Internal.getNodeFromName(z_ncFaces, "CoordinateZ")[1]
+        np_coordsX = Internal.getNodeFromName(z_nc, "CoordinateX")[1]
+        np_coordsY = Internal.getNodeFromName(z_nc, "CoordinateY")[1]
+        np_coordsZ = Internal.getNodeFromName(z_nc, "CoordinateZ")[1]
 
         np_coords = numpy.column_stack((np_coordsX, np_coordsY, np_coordsZ))
         ncFacesCentroids = ComputeQuadCentroids(
@@ -2402,7 +2380,7 @@ class FSCGNSConverter:
 
         Internal._rmNodesFromType(self.pyTree, "Elements_t")
         hook = C.createHook(self.pyTree, "nodes")
-        ids = C.identifyNodes(hook, z_ncFaces)
+        ids = C.identifyNodes(hook, z_nc)
         ids = ids[ids != -1] - 1
         qnqList = ids[locQNQList]
 
@@ -2421,7 +2399,7 @@ class FSCGNSConverter:
                 FSMeshEnums.PCT_Quad4Quad, fs_cell2Node, False
             )
 
-    def InitPseudoCell_QuadNQuadMPI(self, z_ncFaces):
+    def InitPseudoCell_QuadNQuadMPI(self, z_nc):
         if Cmpi.master and self.verbose:
             print("Creating QuadNQuad pseudo connectivity.")
         rank = self.clac.ProcID()
@@ -2434,11 +2412,11 @@ class FSCGNSConverter:
             fsCellType = FSMeshEnums.PCT_Quad4Quad
             createQuadNQuad = CreateQuad4Quad
 
-        if z_ncFaces is not None:
-            z_ncFaces[0] += str(rank)
-            np_coordsX = Internal.getNodeFromName(z_ncFaces, "CoordinateX")[1]
-            np_coordsY = Internal.getNodeFromName(z_ncFaces, "CoordinateY")[1]
-            np_coordsZ = Internal.getNodeFromName(z_ncFaces, "CoordinateZ")[1]
+        if z_nc is not None:
+            z_nc[0] += str(rank)
+            np_coordsX = Internal.getNodeFromName(z_nc, "CoordinateX")[1]
+            np_coordsY = Internal.getNodeFromName(z_nc, "CoordinateY")[1]
+            np_coordsZ = Internal.getNodeFromName(z_nc, "CoordinateZ")[1]
         else:
             np_coordsX = numpy.empty(0)
             np_coordsY = numpy.empty(0)
@@ -2450,10 +2428,10 @@ class FSCGNSConverter:
         lenNCF = len(np_coordsX)
         del np_coordsX, np_coordsY, np_coordsZ
 
-        self.InitCell2Proc(fsCellType, lenNCF)
-        if z_ncFaces is not None:
+        self.cell2ProcDict[fsCellType] = self.InitCell2Proc(lenNCF)
+        if z_nc is not None:
             locNCFaces = (
-                Internal.getNodeFromName(z_ncFaces, "ElementConnectivity")[1]
+                Internal.getNodeFromName(z_nc, "ElementConnectivity")[1]
                 - 1
                 + self.cell2ProcDict[fsCellType][rank]
             )
@@ -2523,11 +2501,11 @@ class FSCGNSConverter:
             )
             locQNQList = dedup2dup[locQNQList]
 
-        self.InitCell2Proc(fsCellType, len(locQNQList))
+        self.cell2ProcDict[fsCellType] = self.InitCell2Proc(len(locQNQList))
         Internal._rmNodesFromType(self.pyTree, "Elements_t")
-        if z_ncFaces is not None:
+        if z_nc is not None:
             hook = C.createHook(self.pyTree, "nodes")
-            ids = C.identifyNodes(hook, z_ncFaces)
+            ids = C.identifyNodes(hook, z_nc)
         else:
             ids = numpy.empty(0, dtype=Internal.E_NpyInt)
         ids = ids[ids > -1] - 1 + self.cell2ProcDict[1][rank]
@@ -2549,13 +2527,9 @@ class FSCGNSConverter:
         return None
 
     @ProfileTime
-    def ParallelDeduplicateNodesFSMesh(self):
+    def DeduplicateFSNodesMPI(self):
         tol = 1e-10
         decimals = int(-numpy.log10(tol))
-        if self.dimPb == 2:
-            quadNQuad = 15
-        else:
-            quadNQuad = 16
 
         fs_coords = self.fsmesh.GetUnstructDataset("Coordinates").GetValues()
         np_coords = numpy.array(fs_coords.Buffer(), copy=True)
@@ -2564,7 +2538,6 @@ class FSCGNSConverter:
         uniqueCoords = numpy.empty((0, 3))
         dedupMap = numpy.empty((0), dtype=Internal.E_NpyInt)
 
-        rank = self.clac.GetProcID()
         if Cmpi.master:
             # Use lexicographical order to sort by z, then y, then x
             lexOrder = numpy.lexsort(
@@ -2592,13 +2565,14 @@ class FSCGNSConverter:
 
         if Cmpi.master:
             print("Removing duplicated vertices from mesh connectivity.")
-        cell2Proc_nodes = InitCell2ProcOutsideClass(
-            self.clac, len(uniqueCoords)
-        )
+        cell2Proc_nodes = self.InitCell2Proc(len(uniqueCoords))
         dedupMap = ArrayOps.Broadcast(dedupMap, self.clac)
         fsCellTypesNC = self.fsVolumeCellTypes + self.fsSurfaceCellTypes
         if not self.conformal:
-            fsCellTypesNC.append(quadNQuad)
+            if self.dimPb == 2:
+                fsCellTypesNC.append(15)
+            else:
+                fsCellTypesNC.append(16)
         cell2NodeDict = {}
         for cellType in fsCellTypesNC:
             fs_cell2Node = self.fsmesh.GetCell2Node(cellType)
@@ -2633,7 +2607,6 @@ class FSCGNSConverter:
                         np_markers_array_cell_type[i]
                     )
                 fsCellTypeMarkersDict[cellType] = fs_markers_array_cell_type
-                # np_markers_celltype_dict_gath = Cmpi.gather(npCellTypeMarkersDict)
 
             fs_bMarkerList = FSIntArray(len(np_bMarkers))
             for i in range(len(np_bMarkers)):
@@ -2657,10 +2630,10 @@ class FSCGNSConverter:
 
             fsDataNames = ["WallPointCoordinates", "DonorPointCoordinates"]
             datasets = []
-            for fsdataname in fsDataNames:
+            for varName in fsDataNames:
                 if self.fsSurfaceCellTypes:
                     dataset = numpy.array(
-                        self.fsmesh.GetUnstructDataset(fsdataname)
+                        self.fsmesh.GetUnstructDataset(varName)
                         .GetValues()
                         .Buffer(),
                         copy=True,
@@ -2679,9 +2652,7 @@ class FSCGNSConverter:
                 np_cell2Node = cell2NodeDict[cellType]
                 fs_cell2Node = FSIntArray(*np_cell2Node.shape)
                 ncellsOfType = np_cell2Node.shape[0]
-                cell2Proc = InitCell2ProcOutsideClass(
-                    self.clac, ncellsOfType
-                )
+                cell2Proc = self.InitCell2Proc(ncellsOfType)
                 if ncellsOfType > 0:
                     numpy.copyto(
                         numpy.array(fs_cell2Node.Buffer(), copy=False),
@@ -2689,7 +2660,7 @@ class FSCGNSConverter:
                         casting="same_kind",
                     )
             else:
-                cell2Proc = InitCell2ProcOutsideClass(self.clac, 0)
+                cell2Proc = self.InitCell2Proc(0)
                 fs_cell2Node = FSIntArray(0, FSCellInfo.NNodes(cellType))
             self.fsmesh.InitUnstructCells(
                 cellType, cell2Proc, fs_cell2Node, True
@@ -2754,9 +2725,9 @@ class FSCGNSConverter:
                 )
             self.InitFSBCCoordinates(fsDataNames, fs_surfaceCellTypes)
             if self.fsSurfaceCellTypes:
-                for fsdataname, dataset in zip(fsDataNames, datasets):
+                for varName, dataset in zip(fsDataNames, datasets):
                     fs_var = self.fsmesh.GetUnstructDataset(
-                        fsdataname
+                        varName
                     ).GetValues()
                     numpy.copyto(
                         numpy.array(fs_var.Buffer(), copy=False),
@@ -2764,7 +2735,7 @@ class FSCGNSConverter:
                         casting="no",
                     )
 
-    def ReleaseResources(self):
+    def FreeResources(self):
         """Delete class attributes that are no longer needed"""
         del (
             self.fsmesh,
@@ -2819,9 +2790,9 @@ class FSCGNSConverter:
             tol=tol,
             removeBC=True,
         )
-        zone = Internal.getZones(self.pyTree)
+        z = Internal.getZones(self.pyTree)[0]
         for FS_node in FS:
-            Internal._addChild(zone[0], FS_node, pos=-1)  # at the end
+            Internal._addChild(z, FS_node, pos=-1)  # at the end
 
     def MergeBCsFamilySpecified(self):
         if Cmpi.master and self.verbose:
@@ -2998,9 +2969,8 @@ class FSCGNSConverter:
             if any(filename.endswith(i) for i in [".h5", ".plt", ".pt"]):
                 filename = filename.rsplit(".", 1)[0]
         elif isinstance(self.meshName, str):
-            filename = self.meshName.rsplit(".", 1)[
-                0
-            ]  # Output saved in the same dir. as the input mesh
+            # Output saved in the same dir. as the input mesh
+            filename = self.meshName.rsplit(".", 1)[0]
         else:
             filename = "t"
 
@@ -3064,7 +3034,7 @@ class FSCGNSConverter:
         else:
             C.convertPyTree2File(self.pyTree, f"{filename}_{Cmpi.rank:03d}.plt")
 
-    # Create aliases
+    # Lower-case aliases for Cassiopee users
     convert = Convert
     convert2CGNS = Convert2CGNS
     convert2FSDM = Convert2FSDM
