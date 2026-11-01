@@ -1448,7 +1448,7 @@ class FSCGNSConverter:
             N_IP_per_element = 1
         else:
             try:
-                import QuadratureDG as Q
+                import Connector.QuadratureDG as Q
             except ImportError:
                 raise ImportError("QuadratureDG module not found.")
             degree = self.ibmParameters["spatial discretization"]["degree"]
@@ -1978,10 +1978,9 @@ class FSCGNSConverter:
         for cellType in self.fsVolumeCellTypes:
             nownedCells = self.fsmesh.GetNOwnedCells(cellType)
             fs_cell2Node = self.fsmesh.GetCell2Node(cellType)
-            np_cell2Node = numpy.array(
+            np_cell2Node = numpy.asarray(
                 fs_cell2Node.Buffer(),
-                dtype=Internal.E_NpyInt,
-                copy=False
+                dtype=Internal.E_NpyInt
             )
             if not includeGhostCells:
                 np_cell2Node = np_cell2Node[:nownedCells]
