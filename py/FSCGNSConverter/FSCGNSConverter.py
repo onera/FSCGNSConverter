@@ -787,7 +787,7 @@ class FSCGNSConverter:
         fs_coordinates = self.fsmesh.GetUnstructDataset(
             self.coordsName
         ).GetValues()
-        np_coordinates = numpy.array(fs_coordinates.Buffer(), copy=False)
+        np_coordinates = numpy.asarray(fs_coordinates.Buffer())
         self.SetNumpyCoordinates(np_coordinates)
 
     @ProfileTime
@@ -1243,7 +1243,7 @@ class FSCGNSConverter:
             # Store the boundary face node counts in a 1D array
             fs_poly2DCell2NodeCounts = FSIntArray(poly2DCell2NodeCounts.size)
             numpy.copyto(
-                numpy.array(fs_poly2DCell2NodeCounts.Buffer(), copy=False),
+                numpy.asarray(fs_poly2DCell2NodeCounts.Buffer()),
                 poly2DCell2NodeCounts,
                 casting="same_kind",
             )
@@ -1251,7 +1251,7 @@ class FSCGNSConverter:
             # Store the boundary face nodes in a 1D array
             fs_poly2DCell2NodeList = FSIntArray(poly2DCell2NodeList.size)
             numpy.copyto(
-                numpy.array(fs_poly2DCell2NodeList.Buffer(), copy=False),
+                numpy.asarray(fs_poly2DCell2NodeList.Buffer()),
                 poly2DCell2NodeList,
                 casting="same_kind",
             )
@@ -1304,7 +1304,7 @@ class FSCGNSConverter:
             # Store the node counts for each polyhedron in a 1D array
             fs_poly3DCell2NodeCounts = FSIntArray(nPoly3D)
             numpy.copyto(
-                numpy.array(fs_poly3DCell2NodeCounts.Buffer(), copy=False),
+                numpy.asarray(fs_poly3DCell2NodeCounts.Buffer()),
                 numpy.asarray(poly3DCell2NodeCounts, dtype=Internal.E_NpyInt),
                 casting="same_kind",
             )
@@ -1313,7 +1313,7 @@ class FSCGNSConverter:
             # Store the node list in a 1D array
             fs_poly3DCell2NodeList = FSIntArray(int(totalNumberOfCellNodes))
             numpy.copyto(
-                numpy.array(fs_poly3DCell2NodeList.Buffer(), copy=False),
+                numpy.asarray(fs_poly3DCell2NodeList.Buffer()),
                 numpy.asarray(poly3DCell2NodeList, dtype=Internal.E_NpyInt),
                 casting="same_kind",
             )
@@ -1321,7 +1321,7 @@ class FSCGNSConverter:
             # Store the number of faces for each 3D polyhedron in a 1D array
             fs_cell2FaceCounts = FSIntArray(nPoly3D)
             numpy.copyto(
-                numpy.array(fs_cell2FaceCounts.Buffer(), copy=False),
+                numpy.asarray(fs_cell2FaceCounts.Buffer()),
                 numpy.diff(np_indPH),
                 casting="same_kind",
             )
@@ -1330,7 +1330,7 @@ class FSCGNSConverter:
             # Store the number of nodes for each face in a 1D array
             fs_face2NodeCounts = FSIntArray(int(totalNumberOfFaces))
             numpy.copyto(
-                numpy.array(fs_face2NodeCounts.Buffer(), copy=False),
+                numpy.asarray(fs_face2NodeCounts.Buffer()),
                 numpy.asarray(face2NodeCounts, dtype=Internal.E_NpyInt),
                 casting="same_kind",
             )
@@ -1339,7 +1339,7 @@ class FSCGNSConverter:
             # Store the face nodes in a 1D array
             fs_face2NodeList = FSIntArray(int(totalNumberOfFaceNodes))
             numpy.copyto(
-                numpy.array(fs_face2NodeList.Buffer(), copy=False),
+                numpy.asarray(fs_face2NodeList.Buffer()),
                 numpy.asarray(face2NodeList, dtype=Internal.E_NpyInt),
                 casting="same_kind",
             )
@@ -1367,7 +1367,7 @@ class FSCGNSConverter:
                 fs_cell2Node = FSIntArray(0, FSCellInfo.NNodes(cellType))
 
             cell2NodeList = self.connectivityDict[cellType]["ElementConnectivity"]
-            fsBuffer = numpy.array(fs_cell2Node.Buffer(), copy=False)
+            fsBuffer = numpy.asarray(fs_cell2Node.Buffer())
 
             if Cmpi.size > 1:
                 if hasCellsOfType:
@@ -1431,7 +1431,7 @@ class FSCGNSConverter:
                 FSDataName(self.coordsName)
             ).GetValues()
             numpy.copyto(
-                numpy.array(fs_coordinates.Buffer(), copy=False),
+                numpy.asarray(fs_coordinates.Buffer()),
                 self.np_coordinates,
                 casting="no",
             )
@@ -1484,7 +1484,7 @@ class FSCGNSConverter:
 
             fs_volumeCellTypes = FSIntArray(len(self.fsVolumeCellTypes))
             numpy.copyto(
-                numpy.array(fs_volumeCellTypes.Buffer(), copy=False),
+                numpy.asarray(fs_volumeCellTypes.Buffer()),
                 self.fsVolumeCellTypes,
                 casting="same_kind",
             )
@@ -1494,7 +1494,7 @@ class FSCGNSConverter:
             )
             fs_var = self.fsmesh.GetUnstructDataset(quantityName).GetValues()
             numpy.copyto(
-                numpy.array(fs_var.Buffer(), copy=False),
+                numpy.asarray(fs_var.Buffer()),
                 np_flisDistance[:, None],
                 casting="no",
             )
@@ -1663,7 +1663,7 @@ class FSCGNSConverter:
                 np_marker_array_cell_type.shape[0]
             )
             numpy.copyto(
-                numpy.array(fs_marker_array_cell_type.Buffer(), copy=False),
+                numpy.asarray(fs_marker_array_cell_type.Buffer()),
                 np_marker_array_cell_type,
                 casting="same_kind",
             )
@@ -1774,7 +1774,7 @@ class FSCGNSConverter:
                 np_marker_array_cell_type.shape[0]
             )
             numpy.copyto(
-                numpy.array(fs_marker_array_cell_type.Buffer(), copy=False),
+                numpy.asarray(fs_marker_array_cell_type.Buffer()),
                 np_marker_array_cell_type,
                 casting="same_kind",
             )
@@ -1791,7 +1791,7 @@ class FSCGNSConverter:
             fs_surfaceCellTypes = FSIntArray(len(self.fsSurfaceCellTypes))
             if self.fsSurfaceCellTypes:
                 numpy.copyto(
-                    numpy.array(fs_surfaceCellTypes.Buffer(), copy=False),
+                    numpy.asarray(fs_surfaceCellTypes.Buffer()),
                     self.fsSurfaceCellTypes,
                     casting="same_kind",
                 )
@@ -1870,7 +1870,7 @@ class FSCGNSConverter:
         if not Cmpi.size > 1:
             fs_surfaceCellTypes = FSIntArray(len(self.fsSurfaceCellTypes))
             numpy.copyto(
-                numpy.array(fs_surfaceCellTypes.Buffer(), copy=False),
+                numpy.asarray(fs_surfaceCellTypes.Buffer()),
                 self.fsSurfaceCellTypes,
                 casting="same_kind",
             )
@@ -1898,7 +1898,7 @@ class FSCGNSConverter:
             )
             fs_coordinates = FSFloatArray(nVertices, 3)
             numpy.copyto(
-                numpy.array(fs_coordinates.Buffer(), copy=False),
+                numpy.asarray(fs_coordinates.Buffer()),
                 np_coordinates,
                 casting="no",
             )
@@ -1914,7 +1914,7 @@ class FSCGNSConverter:
             fs_var = self.fsmesh.GetUnstructDataset(fsdataname).GetValues()
             fs_var.Fill(0.0)
             numpy.copyto(
-                numpy.array(fs_var.Buffer(), copy=False),
+                numpy.asarray(fs_var.Buffer()),
                 dataset,
                 casting="safe",
             )
@@ -1995,7 +1995,7 @@ class FSCGNSConverter:
                 "CADGroupID"
             )
             try:
-                np_bMarkers = numpy.array(fs_bMarkers.Buffer(), copy=False)
+                np_bMarkers = numpy.asarray(fs_bMarkers.Buffer())
             except BufferError:
                 np_bMarkers = []
 
@@ -2004,10 +2004,9 @@ class FSCGNSConverter:
                 # Fill connectivityDict
                 nownedCells = self.fsmesh.GetNOwnedCells(cellType)
                 fs_cell2Node = self.fsmesh.GetCell2Node(cellType)
-                np_cell2Node = numpy.array(
+                np_cell2Node = numpy.asarray(
                     fs_cell2Node.Buffer(),
-                    dtype=Internal.E_NpyInt,
-                    copy=False
+                    dtype=Internal.E_NpyInt
                 )[:nownedCells]
                 self.connectivityDict[cellType] = {
                     "nCells": nownedCells,
@@ -2021,10 +2020,9 @@ class FSCGNSConverter:
                 fs_bMarkerCellType = self.fsmesh.GetCellAttribute(
                     "CADGroupID", cellType
                 )
-                cellType2BMarkersDict[cellType] = numpy.array(
+                cellType2BMarkersDict[cellType] = numpy.asarray(
                     fs_bMarkerCellType.Buffer(),
-                    dtype=Internal.E_NpyInt,
-                    copy=False
+                    dtype=Internal.E_NpyInt
                 )[:nownedCells]  # no ghost cells
 
             for marker in np_bMarkers:
@@ -2242,14 +2240,14 @@ class FSCGNSConverter:
             if loc == "CellCenter":
                 fs_loc = FSIntArray(len(self.fsVolumeCellTypes))
                 numpy.copyto(
-                    numpy.array(fs_loc.Buffer(), copy=False),
+                    numpy.asarray(fs_loc.Buffer()),
                     self.fsVolumeCellTypes,
                     casting="same_kind",
                 )
             elif loc == "FaceCenter":
                 fs_loc = FSIntArray(len(self.fsSurfaceCellTypes))
                 numpy.copyto(
-                    numpy.array(fs_loc.Buffer(), copy=False),
+                    numpy.asarray(fs_loc.Buffer()),
                     self.fsSurfaceCellTypes,
                     casting="same_kind",
                 )
@@ -2385,7 +2383,7 @@ class FSCGNSConverter:
 
         fs_cell2Node = FSIntArray(*qnqList.shape)
         numpy.copyto(
-            numpy.array(fs_cell2Node.Buffer(), copy=False),
+            numpy.asarray(fs_cell2Node.Buffer()),
             qnqList,
             casting="same_kind",
         )
@@ -2514,7 +2512,7 @@ class FSCGNSConverter:
             qnqList = gath_ids[locQNQList]
             fs_cell2Node = FSIntArray(*qnqList.shape)
             numpy.copyto(
-                numpy.array(fs_cell2Node.Buffer(), copy=False),
+                numpy.asarray(fs_cell2Node.Buffer()),
                 qnqList,
                 casting="same_kind",
             )
@@ -2635,7 +2633,7 @@ class FSCGNSConverter:
                         self.fsmesh.GetUnstructDataset(varName)
                         .GetValues()
                         .Buffer(),
-                        copy=True,
+                        copy=True
                     )
                 else:
                     dataset = numpy.empty(0)
@@ -2654,9 +2652,9 @@ class FSCGNSConverter:
                 cell2Proc = self.InitCell2Proc(ncellsOfType)
                 if ncellsOfType > 0:
                     numpy.copyto(
-                        numpy.array(fs_cell2Node.Buffer(), copy=False),
+                        numpy.asarray(fs_cell2Node.Buffer()),
                         np_cell2Node,
-                        casting="same_kind",
+                        casting="same_kind"
                     )
             else:
                 cell2Proc = self.InitCell2Proc(0)
@@ -2674,9 +2672,9 @@ class FSCGNSConverter:
                 FSDataName(self.coordsName)
             ).GetValues()
             numpy.copyto(
-                numpy.array(fs_coordinates.Buffer(), copy=False),
+                numpy.asarray(fs_coordinates.Buffer()),
                 uniqueCoords,
-                casting="no",
+                casting="no"
             )
 
         for name, marker in zip(names, fs_bMarkerList):
@@ -2697,9 +2695,9 @@ class FSCGNSConverter:
             fs_volumeCellTypes = FSIntArray(len(self.fsVolumeCellTypes))
             if self.fsVolumeCellTypes:
                 numpy.copyto(
-                    numpy.array(fs_volumeCellTypes.Buffer(), copy=False),
+                    numpy.asarray(fs_volumeCellTypes.Buffer()),
                     self.fsVolumeCellTypes,
-                    casting="same_kind",
+                    casting="same_kind"
                 )
 
             self.fsmesh.InitUnstructDataset(
@@ -2711,16 +2709,16 @@ class FSCGNSConverter:
                     quantityName
                 ).GetValues()
                 numpy.copyto(
-                    numpy.array(fs_var.Buffer(), copy=False),
+                    numpy.asarray(fs_var.Buffer()),
                     np_flisDistance,
-                    casting="no",
+                    casting="no"
                 )
             fs_surfaceCellTypes = FSIntArray(len(self.fsSurfaceCellTypes))
             if self.fsSurfaceCellTypes:
                 numpy.copyto(
-                    numpy.array(fs_surfaceCellTypes.Buffer(), copy=False),
+                    numpy.asarray(fs_surfaceCellTypes.Buffer()),
                     self.fsSurfaceCellTypes,
-                    casting="same_kind",
+                    casting="same_kind"
                 )
             self.InitFSBCCoordinates(fsDataNames, fs_surfaceCellTypes)
             if self.fsSurfaceCellTypes:
@@ -2729,9 +2727,9 @@ class FSCGNSConverter:
                         varName
                     ).GetValues()
                     numpy.copyto(
-                        numpy.array(fs_var.Buffer(), copy=False),
+                        numpy.asarray(fs_var.Buffer()),
                         dataset,
-                        casting="no",
+                        casting="no"
                     )
 
     def FreeResources(self):
