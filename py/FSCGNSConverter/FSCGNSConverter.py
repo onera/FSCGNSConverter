@@ -11,6 +11,7 @@ import Converter.Mpi as Cmpi
 import Generator.PyTree as G
 import Transform.PyTree as T
 import Post.PyTree as P
+import Connector.Mpi as Xmpi
 
 from FSDataManager import (
     FSClac,
@@ -666,16 +667,16 @@ class FSCGNSConverter:
             includeSurfaceData=includeSurfaceData,
         )
         self.InitCGNSConnectivity(includeSurfaceData=includeSurfaceData)
-
-        if forOverset:
-            return
+        self.RecoverFSFlowSolution()
 
         if Cmpi.size > 1:
             Cmpi._setProc(self.pyTree, Cmpi.rank)
+            self.ReassignBCFacesMPI()
+            self.RemoveOrphansMPI()
 
-        self.RecoverFSFlowSolution()
-
-        if forFFDX:
+        if forOverset:
+            return
+        elif forFFDX:
             self.FreeResources()
             # Convert ME to NGon
             if Cmpi.master and self.verbose:
@@ -692,14 +693,161 @@ class FSCGNSConverter:
                 XOR._reorient(self.pyTree)
 
             self.MergeBCsByMarker()
-            G._rmOrphans(self.pyTree)
-        else:
+
+            # Add BCMatch
+            zones = Internal.getZones(self.pyTree)
+            Xmpi._connectMatchNGon(zones[0])
+
+    def RemoveOrphansMPI(self):
+        zones = Internal.getZones(self.pyTree)
+        for z in zones:
             status = {}
             indices = []
-            BCInfo = C.getBCs(self.pyTree)
-            G._close(self.pyTree, indices=indices, status=status)
-            if status.get("modified"):
-                C._recoverBCs(self.pyTree, BCInfo=BCInfo, removeBC=True) # TODO add indices
+            G._rmOrphans(z, indices=indices, status=status)
+            if status["modified"]:
+                C._recoverBCs(z, BCInfo=None, indices=indices[0])
+
+    def ReassignBCFacesMPI(self):
+        # If there are boundary faces that do not belong to their current
+        # rank after partitioning, reassign them
+        missingBCInfo = []
+        z = Internal.getZones(self.pyTree)[0]
+        bcInfo = C.getBCs(z)
+        # Gather missing BC info and fix zones from which BC data should be
+        # removed
+        C._recoverBCsGeometric(z, bcInfo, removeBC=True,
+                               missingBCInfo=missingBCInfo)
+
+        # Fix zones from which BC data should be added
+        missingBCInfo = Cmpi.allgather(missingBCInfo)
+        missingBCInfo = [
+            info for i, info in enumerate(missingBCInfo)
+            if (i != Cmpi.rank and info[0])
+        ]
+        missingBCInfoDict = {}
+        for info in missingBCInfo:
+            for bcData, bcName, bcType in zip(*info):
+                missingBCInfoDict.setdefault(f"{bcName}:{bcType}", []).append(bcData)
+        if not missingBCInfoDict:
+            return
+
+        for bcName, bcData in missingBCInfoDict.items():
+            if len(bcData) > 1:
+                missingBCInfoDict[bcName] = T.join(bcData)
+            else: missingBCInfoDict[bcName] = bcData[0]
+
+        # Check if there is at least one BC name on this MPI rank listed in
+        # missingBCInfoDict
+        commonBCNames = (
+            {key.split(":")[0].rsplit(".", 1)[0] for key in missingBCInfoDict}
+            & {v["name"] for v in self.bcDict.values()}
+        )
+        if not commonBCNames:
+            return
+
+        # Create a hook holding vertex coordinates of the current zone
+        hookV = C.createHook(z, function="nodes")
+        
+        # Get exterior faces and indirection, indicesF
+        indicesF = []
+        zf = P.exteriorFaces(z, indices=indicesF)
+        indicesF = indicesF[0]
+        hookC = C.createHook(zf, function="elementCenters")
+
+        # Get BC face indices of this MPI rank, indicesBC
+        indicesBC = []
+        # for bcInfo in self.bcDict.values():
+        #     if "facePLs" in bcInfo:
+        #         f = [i.ravel("k") for i in bcInfo["facePLs"]]
+        #         indicesBC.extend(f)
+        #     elif "ElementRange" in bcInfo:
+        #         pass
+
+        # Get undefined BC face indices, indicesE, as the set difference
+        # between indicesF and indicesBC
+        if indicesBC == []:
+            indicesE = indicesF
+        else:
+            indicesBC = numpy.concatenate(indicesBC)
+            indicesE = Converter.converter.diffIndex(indicesF, indicesBC)
+
+        n_belts = Internal.getElementBoundaryNodes(z)
+        n_zoneBCs = Internal.getNodesFromType1(z, "ZoneBC_t")
+        n_bcs = Internal.getNodesFromType2(n_zoneBCs, "BC_t")
+
+        for bcNameAndType, bcData in missingBCInfoDict.items():
+            bcName, bcType = bcNameAndType.split(":")
+
+            # Identify faces
+            ids = C.identifyElements(hookC, bcData, rtol=0.)
+
+            # Get number of BC faces found, nnewFaces, and the valid ids
+            mask = ids != -1
+            validPos = numpy.nonzero(mask)[0].astype(Internal.E_NpyInt)
+            nnewFaces = validPos.size
+            if nnewFaces == 0:
+                continue
+
+            idsV = C.identifyNodes(hookV, bcData)
+            validIds = ids[mask] - 1  # keep non -1 indices
+            faceList = indicesF[validIds]
+
+            for n_bc in n_bcs:
+                if n_bc[0].count(".") > 1:
+                    locBCName = n_bc[0].rsplit(".", 1)[0]
+                else:
+                    locBCName = n_bc[0]
+                if not (
+                    locBCName == bcName
+                    and Internal.getValue(n_bc) == bcType
+                ):
+                    continue
+
+                n_bcer = Internal.getNodeFromName1(n_bc, "ElementRange")
+                n_facePL = Internal.getNodeFromName1(n_bc, "PointList")
+                if n_bcer is not None:  # ElementRange
+                    np_bcer = n_bcer[1]
+                    # Append boundary connectivity
+                    n_newElts = Internal.getElementNodes(bcData)
+                    for n_newElt in n_newElts:
+                        nvpe = Internal.eltNo2EltName(n_newElt[1][0])[1]
+                        n_newEC = Internal.getNodeFromName1(n_newElt, "ElementConnectivity")
+                        np_newEC = n_newEC[1].reshape(-1, nvpe)[validPos].ravel()
+                        np_newEC = idsV[np_newEC-1]
+
+                        found = False
+                        for n_belt in n_belts:
+                            np_ber = Internal.getNodeFromName1(n_belt, "ElementRange")[1]
+                            if np_bcer[0][0] != np_ber[0] or np_bcer[0][1] != np_ber[1]:
+                                continue
+                            print(
+                                f"[{Cmpi.rank}] Warning: Reassigning {nnewFaces} "
+                                f"missing face(s) to BC {bcName} ({bcType})"
+                            )
+                            np_ber[1] += nnewFaces  # Correct Elements_t ERmax
+                            n_ec = Internal.getNodeFromName1(n_belt, "ElementConnectivity")
+                            n_ec[1] = numpy.append(n_ec[1], np_newEC)
+                            found = True
+                            break
+
+                    if not found:
+                        continue
+                    # Correct BC ElementRange
+                    np_bcer[0][1] += nnewFaces
+                    # Append BC data
+                    n_bcdata = Internal.getNodesFromType2(n_bc, "BCData_t")
+                    for n_data in n_bcdata:
+                        n_datasets = Internal.getNodesFromType1(n_data, "DataArray_t")
+                        varNames = [n_ds[0] for n_ds in n_datasets]
+                        f = C.getFields("centers", bcData, vars=varNames, api=3)[0]
+                        for n_ds, arr in zip(n_datasets, f[1]):
+                            n_ds[1] = numpy.append(n_ds[1], arr[validPos])
+
+                elif n_facePL is not None: # PointList
+                    raise NotImplementedError
+
+        C.freeHook(hookV)
+        C.freeHook(hookC)
 
     def Convert2FSDM(self):
         """Convert a mesh from CGNS to FS"""
