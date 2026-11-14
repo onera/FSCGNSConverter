@@ -11,6 +11,7 @@ import Converter.Mpi as Cmpi
 import Generator.PyTree as G
 import Transform.PyTree as T
 import Post.PyTree as P
+import Connector.Mpi as Xmpi
 
 from FSDataManager import (
     FSClac,
@@ -693,6 +694,10 @@ class FSCGNSConverter:
 
             self.MergeBCsByMarker()
 
+            # Add BCMatch
+            zones = Internal.getZones(self.pyTree)
+            Xmpi._connectMatchNGon(zones[0])
+
     def RemoveOrphansMPI(self):
         zones = Internal.getZones(self.pyTree)
         for z in zones:
@@ -734,7 +739,7 @@ class FSCGNSConverter:
         # Check if there is at least one BC name on this MPI rank listed in
         # missingBCInfoDict
         commonBCNames = (
-            key.split(":")[0].rsplit(".", 1)[0] 
+            {key.split(":")[0].rsplit(".", 1)[0] for key in missingBCInfoDict}
             & {v["name"] for v in self.bcDict.values()}
         )
         if not commonBCNames:
@@ -782,7 +787,7 @@ class FSCGNSConverter:
             nnewFaces = validPos.size
             if nnewFaces == 0:
                 continue
-            
+
             idsV = C.identifyNodes(hookV, bcData)
             validIds = ids[mask] - 1  # keep non -1 indices
             faceList = indicesF[validIds]
