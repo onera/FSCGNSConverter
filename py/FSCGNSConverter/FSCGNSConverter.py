@@ -740,21 +740,18 @@ class FSCGNSConverter:
         if not commonBCNames:
             return
 
+        # Create a hook holding vertex coordinates of the current zone
+        hookV = C.createHook(z, function="nodes")
+        
         # Get exterior faces and indirection, indicesF
         indicesF = []
         zf = P.exteriorFaces(z, indices=indicesF)
         indicesF = indicesF[0]
         hookC = C.createHook(zf, function="elementCenters")
 
-        # if Cmpi.master: print("indicesF", indicesF)
-        hookV = C.createHook(z, function="nodes")
-
-        n_belts = Internal.getElementBoundaryNodes(z)
-
         # Get BC face indices of this MPI rank, indicesBC
         indicesBC = []
         # for bcInfo in self.bcDict.values():
-        #     if Cmpi.master: print("bcInfo", bcInfo)
         #     if "facePLs" in bcInfo:
         #         f = [i.ravel("k") for i in bcInfo["facePLs"]]
         #         indicesBC.extend(f)
@@ -768,8 +765,8 @@ class FSCGNSConverter:
         else:
             indicesBC = numpy.concatenate(indicesBC)
             indicesE = Converter.converter.diffIndex(indicesF, indicesBC)
-        # if Cmpi.master: print("indicesE", indicesE)
 
+        n_belts = Internal.getElementBoundaryNodes(z)
         n_zoneBCs = Internal.getNodesFromType1(z, "ZoneBC_t")
         n_bcs = Internal.getNodesFromType2(n_zoneBCs, "BC_t")
 
@@ -819,7 +816,7 @@ class FSCGNSConverter:
                             if np_bcer[0][0] != np_ber[0] or np_bcer[0][1] != np_ber[1]:
                                 continue
                             print(
-                                f"[{Cmpi.rank}] Warning: Assigning {nnewFaces} new "
+                                f"[{Cmpi.rank}] Warning: Reassigning {nnewFaces} "
                                 f"missing face(s) to BC {bcName} ({bcType})"
                             )
                             np_ber[1] += nnewFaces  # Correct Elements_t ERmax
