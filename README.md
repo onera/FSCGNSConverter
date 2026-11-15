@@ -54,18 +54,18 @@ convObj = FSCGNSConverter(
 
 | Input argument | Name in FSMeshPyTreeConversion | Type | Default | Description |
 |--------------|------------|--------------|--------------|-------------|
-| meshName | mesh_name | str | None | Mesh filename |
-| pyTree | pytree | CGNS PyTree / base / zone | None | Input CGNS mesh |
-| clac | | object | None, ie, `FSClac` | FSDataManager's `clac` object |
-| fsmesh | | object | None | FSDataManager's `fsmesh` object |
-| flipYZAxes | invertPlanesYZ | bool | False | Whether to flip the y- and z-axes |
-| conformal | | bool | True | Whether the mesh presents hanging nodes |
-| IBMParameters | IBM_parameters | dict | None | Dictionary of IBM parameters |
-| dimPb | | int | 2 | Problem dimension (only useful for IBM) |
-| datasets | whichDatasets | str, list or set | 'all' | Names of the datasets to consider during conversion |
-| bcDict | dict_BCs | dict | None | Dictionary mapping FS BC markers to pairs of CGNS BC names and types |
-| coordsName | coords_name  | str | "Coordinates" | Name of the Coordinates field |
-| verbose | x | bool | True | Whether to display the step-by-step script progression |
+| `meshName` | `mesh_name` | str | None | Mesh filename |
+| `pyTree` | `pytree` | CGNS PyTree / base / zone | None | Input CGNS mesh |
+| `clac | | object | None, ie, `FSClac` | FSDataManager's `clac` object |
+| `fsmesh | | object | None | FSDataManager's `fsmesh` object |
+| `flipYZAxes` | `invertPlanesYZ` | bool | False | Whether to flip the y- and z-axes |
+| `conformal` | | bool | True | Whether the mesh presents hanging nodes |
+| `IBMParameters` | `IBM_parameters` | dict | None | Dictionary of IBM parameters |
+| `dimPb` | | int | 2 | Problem dimension (only useful for IBM) |
+| `datasets` | `whichDatasets` | str, list or set | 'all' | Names of the datasets to consider during conversion |
+| `bcDict` | `dict_BCs` | dict | None | Dictionary mapping FS BC markers to pairs of CGNS BC names and types |
+| `coordsName` | `coords_name`  | str | "Coordinates" | Name of the Coordinates field |
+| `verbose` | - | bool | True | Whether to display the step-by-step script progression |
 
 NB: Input arguments `inmemory`, `keepFlowSolution` and `IBM` were deleted.
 
