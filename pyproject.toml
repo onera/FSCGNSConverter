@@ -13,9 +13,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "FSCGNSConverter"  # "fscgnsconverter"
 description = """
-FSCGNSConverter is a mesh conversion FS plugin that facilitates data 
-exchange between the CODA ecosystem and ONERA's CGNS pre- and 
-post-processing tools.
+FSCGNSConverter is a mesh conversion Flow-Simulator/Cassiopee module that
+facilitates data exchange between the CODA ecosystem and ONERA's CGNS pre- and
+post-processing toolbox Cassiopee.
 """
 readme = "README.rst"
 authors = [{name = "ONERA (The French Aerospace Lab)"}]
@@ -27,12 +27,13 @@ dependencies = [
     "numpy",
 #    "FSDataManager",
 #    "FSDMPyUtils",
-#    "XCore",
-#    "Converter",
-#    "Generator",
-#    "Transform",
-#    "Post",
-#    "Intersector",
+#    "cassiopee-xcore",
+#    "cassiopee-converter",
+#    "cassiopee-generator",
+#    "cassiopee-transform",
+#    "cassiopee-post",
+#    "cassiopee-connector",
+#    "cassiopee-intersector",
 ]
 
 # Defines optional dependency groups. Users can install these with `pip install package[dev]`.
