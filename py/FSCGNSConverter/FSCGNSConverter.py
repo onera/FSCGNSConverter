@@ -1,4 +1,5 @@
 # Import modules
+import os
 import sys
 import time
 from functools import wraps
@@ -405,10 +406,10 @@ def BuildMeshOps(
     else:
         partitioningCmd = "RepartitionMeshPARMETIS"
 
-    meshFormat = meshName.split(".")[-1]
-    if meshFormat == "h5":
+    meshFormat = os.path.splitext(meshName)[1]
+    if meshFormat == ".h5":
         meshImportCmd = "ImportMeshHDF5"
-    elif meshFormat in ["grid", "cdf"]:
+    elif meshFormat in [".grid", ".cdf"]:
         meshImportCmd = "ImportMeshTAU"
     else:
         raise ValueError(
@@ -2244,8 +2245,7 @@ class FSCGNSConverter:
                 cgnsEltName = Internal.eltNo2EltName(cgnsEltNo)[0]
                 eltRange = [ntotElts + 1, ntotElts + nCellsOfType]
 
-                # If cgnsEltName is already in bcName, remove it
-                bcName = self.bcDict[marker]["name"].split(".")[0]
+                bcName = self.bcDict[marker]["name"]
                 bcName = f"{bcName}.{cgnsEltName}_{marker}"
                 Internal.newElements(
                     name=bcName,
@@ -2340,7 +2340,7 @@ class FSCGNSConverter:
                 if zoneBC is not None:
                     n_bcs = Internal.getNodesFromType(zoneBC, "BC_t")
                     for i, n_bc in enumerate(n_bcs):
-                        suffix = n_bc[0].split(".")[1]
+                        suffix = n_bc[0].rsplit(".", 1)[1]
                         cgnsCellName, marker = suffix.split("_")
                         cgnsCellType = Internal.eltName2EltNo(cgnsCellName)[0]
                         cellType = FSCGNSConverter.CGNS2FS_CT.get(cgnsCellType)
@@ -2903,8 +2903,11 @@ class FSCGNSConverter:
         for n_bc in n_bcs:
             bcName = Internal.getName(n_bc)
             bcType = Internal.getValue(n_bc)
-            familyName, marker = bcName.split(".")[:2]
-            marker = marker.split("_")[1]
+            if ".TRI" in bcName:
+                familyName, marker = bcName.rsplit(".TRI", 1)[:2]
+            else:  #if ".QUAD" in bcName:
+                familyName, marker = bcName.rsplit(".QUAD", 1)[:2]
+            marker = marker.replace("_", "").split(".", 1)[0]
             familyNameMarker = f"{familyName}_{marker}"
             if marker not in fsMarkers:
                 fsMarkers.append(marker)
@@ -2953,7 +2956,10 @@ class FSCGNSConverter:
         for n_bc in n_bcs:
             bcName = Internal.getName(n_bc)
             bcType = Internal.getValue(n_bc)
-            familyName = bcName.split(".")[0]
+            if ".TRI" in bcName:
+                familyName = bcName.rsplit(".TRI", 1)[0]
+            else:  #if ".QUAD" in bcName:
+                familyName = bcName.rsplit(".QUAD", 1)[0]
             BCs.append((bcName, bcType, familyName))
             Internal.createChild(
                 n_bc, "FamilyName", "FamilyName_t", value=familyName, pos=0
