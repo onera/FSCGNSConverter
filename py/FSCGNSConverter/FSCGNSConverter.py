@@ -2904,9 +2904,9 @@ class FSCGNSConverter:
             bcName = Internal.getName(n_bc)
             bcType = Internal.getValue(n_bc)
             if ".TRI" in bcName:
-                familyName, marker = bcName.rsplit(".TRI", 1)[:2]
+                familyName, marker = bcName.rsplit(".TRI", 1)
             else:  #if ".QUAD" in bcName:
-                familyName, marker = bcName.rsplit(".QUAD", 1)[:2]
+                familyName, marker = bcName.rsplit(".QUAD", 1)
             marker = marker.replace("_", "").split(".", 1)[0]
             familyNameMarker = f"{familyName}_{marker}"
             if marker not in fsMarkers:
@@ -3078,12 +3078,12 @@ class FSCGNSConverter:
     def Export(self, filename, **kwargs):
         """Export to file based on the filename extension"""
         validExtensions = ["cgns", "h5", "plt"]
-        ext = filename.split(".")[-1]
-        if ext == "cgns":
+        ext = os.path.splitext(filename)[1]
+        if ext == ".cgns":
             self.ExportCGNS(filename=filename, **kwargs)
-        elif ext == "h5":
+        elif ext == ".h5":
             self.ExportFSMesh(filename=filename, **kwargs)
-        elif ext == "plt":
+        elif ext == ".plt":
             self.__Export2Tecplot(filename=filename)
         else:
             raise ValueError(
@@ -3097,11 +3097,10 @@ class FSCGNSConverter:
         if Cmpi.master and self.verbose:
             print("Export FS mesh.")
         if filename:
-            if filename.endswith(".h5"):
-                filename = filename[:-3]
+            filename = os.path.splitext(filename)[0]
         elif isinstance(self.meshName, str):
             # Mesh saved in the same dir. as the input mesh
-            filename = self.meshName.split(".")[0]
+            filename = os.path.splitext(self.meshName)[0]
         else:
             filename = "t"
         if not self.fsmesh.ExportMeshHDF5(Filename=filename + ".h5"):
@@ -3118,10 +3117,10 @@ class FSCGNSConverter:
             if filename.endswith(".pt"):
                 ext = "pt"
             if any(filename.endswith(i) for i in [".h5", ".plt", ".pt"]):
-                filename = filename.rsplit(".", 1)[0]
+                filename = os.path.splitext(filename)[0]
         elif isinstance(self.meshName, str):
             # Output saved in the same dir. as the input mesh
-            filename = self.meshName.rsplit(".", 1)[0]
+            filename = os.path.splitext(self.meshName)[0]
         else:
             filename = "t"
 
@@ -3153,12 +3152,10 @@ class FSCGNSConverter:
         if Cmpi.master and self.verbose:
             print("Export CGNS mesh.")
         if filename:
-            if filename.endswith(".cgns"):
-                filename = filename[:-5]
+            filename = os.path.splitext(filename)[0]
         elif isinstance(self.meshName, str):
-            filename = self.meshName.rsplit(".", 1)[
-                0
-            ]  # Mesh saved in the same dir. as the input mesh
+            # Mesh saved in the same dir. as the input mesh
+            filename = os.path.splitext(self.meshName)[0]
         else:
             filename = "t"
         Cmpi.convertPyTree2File(self.pyTree, filename + ".cgns")
@@ -3170,14 +3167,10 @@ class FSCGNSConverter:
         if Cmpi.master and self.verbose:
             print("Export CGNS mesh to tecplot format.")
         if filename:
-            if filename.endswith(".cgns"):
-                filename = filename[:-5]
-            elif filename.endswith(".plt"):
-                filename = filename[:-4]
+            filename = os.path.splitext(filename)[0]
         elif isinstance(self.meshName, str):
-            filename = self.meshName.split(".")[
-                0
-            ]  # Output saved in the same dir. as the input mesh
+            # Output saved in the same dir. as the input mesh
+            filename = os.path.splitext(self.meshName)[0]
         else:
             filename = "t"
         if Cmpi.size == 1:
