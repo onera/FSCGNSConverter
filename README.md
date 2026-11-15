@@ -56,8 +56,8 @@ convObj = FSCGNSConverter(
 |--------------|------------|--------------|--------------|-------------|
 | `meshName` | `mesh_name` | str | None | Mesh filename |
 | `pyTree` | `pytree` | CGNS PyTree / base / zone | None | Input CGNS mesh |
-| `clac | | object | None, ie, `FSClac` | FSDataManager's `clac` object |
-| `fsmesh | | object | None | FSDataManager's `fsmesh` object |
+| `clac` | | object | None, ie, `FSClac` | FSDataManager's `clac` object |
+| `fsmesh` | | object | None | FSDataManager's `fsmesh` object |
 | `flipYZAxes` | `invertPlanesYZ` | bool | False | Whether to flip the y- and z-axes |
 | `conformal` | | bool | True | Whether the mesh presents hanging nodes |
 | `IBMParameters` | `IBM_parameters` | dict | None | Dictionary of IBM parameters |
