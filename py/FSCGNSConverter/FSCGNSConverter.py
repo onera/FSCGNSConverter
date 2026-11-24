@@ -1937,6 +1937,9 @@ class FSCGNSConverter:
         ibmBMarkers = []
         ibmNames = []
         if self.ibm:
+            spatial_discretization = self.ibmParameters["spatial discretization"][
+                "type"
+            ]
             fsdatanames = ["WallPointCoordinates", "DonorPointCoordinates"]
             if spatial_discretization != "FV":
                 fsdatanames.insert(0, "IntegrationPointCoordinates")
