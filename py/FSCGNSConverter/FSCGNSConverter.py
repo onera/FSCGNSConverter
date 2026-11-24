@@ -1603,15 +1603,16 @@ class FSCGNSConverter:
             degree = self.ibmParameters["spatial discretization"]["degree"]
             if spatial_discretization == "DG":
                 quadratureType = "GaussLegendre"
+                integrationDegree = 2 * degree + 1
             elif spatial_discretization == "DGSEM":
                 quadratureType = "GaussLobatto"
+                integrationDegree = 2 * degree - 1
             else:
                 raise ValueError(
                     "InitIBMDatasets: spatial discretization "
                     f"'{spatial_discretization}' not supported: options are "
                     "DG and DGSEM."
                 )
-            integrationDegree = 2 * degree - 1
             N_IP_per_element = Q.GetReferencePointsHexa(
                 integrationDegree, quadratureType
             )[0]
@@ -1937,6 +1938,8 @@ class FSCGNSConverter:
         ibmNames = []
         if self.ibm:
             fsdatanames = ["WallPointCoordinates", "DonorPointCoordinates"]
+            if spatial_discretization != "FV":
+                fsdatanames.insert(0, "IntegrationPointCoordinates")
             fs_surfaceCellTypes = FSIntArray(len(self.fsSurfaceCellTypes))
             if self.fsSurfaceCellTypes:
                 numpy.copyto(
